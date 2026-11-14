@@ -1,0 +1,8 @@
+[project]
+name = "dominion-engine"
+version = "1.0.0"
+description = "Dominion base set (2nd edition) with Steam Dominion's rules: Python reference + C engine"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["dominion_engine"]
