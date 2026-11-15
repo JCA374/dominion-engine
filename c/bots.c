@@ -61,3 +61,45 @@ int de_card_table(int *out) {
     }
     return DE_NUM_CARDS;
 }
+
+/* Test of de_resume_buy: Big Money bots play a game; at the `at`-th buy decision a copy of the
+ * game is taken, and after the game the copy is resumed with the same answer. Without de_hide it
+ * must finish identically. out: [same turns and decks, same winners, same scores, copied]. */
+typedef struct { bot b; int at, seen, copied, answer; de_game *copy; } spy;
+
+static int spy_decide(void *ctx, const de_game *g, int kind, int player, int subject,
+                      const int *opts, int n, int may_pass) {
+    spy *s = ctx;
+    int a = bot_decide(&s->b, g, kind, player, subject, opts, n, may_pass);
+    if (kind == DE_BUY && !s->copied && ++s->seen == s->at) {
+        *s->copy = *g;
+        s->copied = 1;
+        s->answer = a;
+    }
+    return a;
+}
+
+void de_resume_check(const int *kingdom, int kn, uint64_t seed, int at, int *out) {
+    static de_game g, copy;
+    spy spies[2];
+    de_agent agents[2];
+    for (int i = 0; i < 2; i++) {
+        spies[i] = (spy){{BOT_BIG_MONEY, 1}, i == 0 ? at : 0, 0, i != 0, -1, &copy};
+        agents[i].decide = spy_decide;
+        agents[i].ctx = &spies[i];
+    }
+    de_init(&g, kingdom, kn, 2, seed);
+    de_run(&g, agents);
+    out[3] = spies[0].copied;
+    if (!spies[0].copied) { out[0] = out[1] = out[2] = 0; return; }
+    spies[0].copied = 1;
+    de_resume_buy(&copy, agents, spies[0].answer);
+    int same = 1;                     /* (the trace differs: the copy skips hashing the first buy) */
+    for (int i = 0; i < 2; i++) {
+        same &= copy.p[i].turns == g.p[i].turns;
+        for (int c = 0; c < DE_NUM_CARDS; c++) same &= de_count(&copy.p[i], c) == de_count(&g.p[i], c);
+    }
+    out[0] = same;
+    out[1] = de_winners(&copy) == de_winners(&g);
+    out[2] = de_score(&copy, 0) == de_score(&g, 0) && de_score(&copy, 1) == de_score(&g, 1);
+}

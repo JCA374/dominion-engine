@@ -89,4 +89,11 @@ int de_count(const de_player *p, int card);              /* copies owned */
 int de_total(const de_player *p);                        /* cards owned */
 uint64_t de_rng_next(uint64_t *state);
 
+/* Rollouts (search agents). From inside a DE_BUY decision, copy the game (a plain struct), call
+ * de_hide on the copy so the unseen card order is random, then de_resume_buy: buys `first`
+ * (-1 = stop buying), lets the agents play the rest of that buy phase and the game. C only:
+ * these continue a game, they add no rules. */
+void de_resume_buy(de_game *g, const de_agent *agents, int first);
+void de_hide(de_game *g, int me, uint64_t seed);
+
 #endif

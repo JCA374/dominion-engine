@@ -41,3 +41,25 @@ def test_python_and_c_play_the_same_games():
         assert (py.scores, py.turns, py.winners, py.capped, py.trace) == \
             (c["scores"], c["turns"], c["winners"], c["capped"], c["trace"]), (s, kingdom, bots)
     assert seen == set(range(NUM_KINDS)), f"decision kinds never reached: {set(range(NUM_KINDS)) - seen}"
+
+
+def test_a_game_resumed_from_a_copy_at_a_buy_finishes_the_same():
+    """de_resume_buy (rollouts of search agents): a copy taken at a buy decision and resumed with
+    the same answer replays the rest of the game exactly."""
+    import ctypes
+    from dominion_engine import fast
+    lib = fast.lib()
+    lib.de_resume_check.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_uint64,
+                                    ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+    k = fast.kingdom_ids(["Village", "Smithy", "Market", "Witch", "Militia", "Moat", "Cellar",
+                          "Gardens", "Mine", "Library"])
+    kk = (ctypes.c_int * len(k))(*k)
+    checked = 0
+    for seed in range(1, 60):
+        for at in (1, 5, 12, 20):
+            out = (ctypes.c_int * 4)()
+            lib.de_resume_check(kk, len(k), seed, at, out)
+            if out[3]:
+                assert list(out[:3]) == [1, 1, 1], (seed, at)
+                checked += 1
+    assert checked > 150

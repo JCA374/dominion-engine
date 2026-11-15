@@ -383,6 +383,9 @@ static void play_card(de_game *g, int i, int card) {
 }
 
 /* ── turns and the game ── */
+static void buy_phase(de_game *g, int i);
+static void cleanup(de_game *g, int i);
+
 static void turn(de_game *g, int i) {
     de_player *p = &g->p[i];
     int opts[DE_NUM_CARDS], n;
@@ -412,18 +415,31 @@ static void turn(de_game *g, int i) {
         }
     }
     p->hand_n = rest;
+    buy_phase(g, i);
+    cleanup(g, i);
+}
 
+static void buy_card(de_game *g, int i, int b) {
+    de_player *p = &g->p[i];
+    g->supply[b]--;
+    p->discard[p->discard_n++] = b;
+    g->coins -= DE_CARDS[b].cost;
+    g->buys--;
+}
+
+static void buy_phase(de_game *g, int i) {
+    int opts[DE_NUM_CARDS], n;
     while (g->buys > 0) {
         n = gainable(g, g->coins, 0, opts);
         if (!n) break;
         int b = ask(g, DE_BUY, i, opts, n, 1, -1);
         if (b < 0) break;
-        g->supply[b]--;
-        p->discard[p->discard_n++] = b;
-        g->coins -= DE_CARDS[b].cost;
-        g->buys--;
+        buy_card(g, i, b);
     }
+}
 
+static void cleanup(de_game *g, int i) {
+    de_player *p = &g->p[i];
     memcpy(p->discard + p->discard_n, p->play, (size_t)p->play_n * sizeof(int));
     p->discard_n += p->play_n;
     memcpy(p->discard + p->discard_n, p->hand, (size_t)p->hand_n * sizeof(int));
@@ -473,6 +489,48 @@ void de_run(de_game *g, const de_agent *agents) {
             if (game_over(g)) { g->over = 1; ended = 1; break; }
         }
         if (!ended && g->p[g->nplayers - 1].turns >= DE_ROUND_CAP) g->over = g->capped = 1;
+    }
+}
+
+/* ── rollouts: continue a copied game (search agents) ── */
+
+static void run_from(de_game *g, int next) {
+    /* the round in progress, from seat `next`, then whole rounds as in de_run */
+    for (int i = next; i < g->nplayers && !g->over; i++) {
+        turn(g, i);
+        if (game_over(g)) g->over = 1;
+    }
+    if (!g->over && g->p[g->nplayers - 1].turns >= DE_ROUND_CAP) g->over = g->capped = 1;
+    if (!g->over) de_run(g, g->agents);
+}
+
+void de_resume_buy(de_game *g, const de_agent *agents, int first) {
+    int i = g->current;
+    g->agents = agents;
+    if (first >= 0) {
+        buy_card(g, i, first);
+        buy_phase(g, i);
+    }
+    cleanup(g, i);
+    if (game_over(g)) { g->over = 1; return; }
+    run_from(g, i + 1);
+}
+
+void de_hide(de_game *g, int me, uint64_t seed) {
+    uint64_t master = seed ? seed : 1;
+    for (int i = 0; i < g->nplayers; i++) {
+        de_player *p = &g->p[i];
+        p->rng = de_rng_next(&master) | 1;
+        if (i != me) {                    /* their hand is unseen: back into the deck, redraw */
+            int h = p->hand_n;
+            memcpy(p->deck + p->deck_n, p->hand, (size_t)h * sizeof(int));
+            p->deck_n += h;
+            p->hand_n = 0;
+            shuffle(p->deck, p->deck_n, &p->rng);
+            draw(p, h);
+        } else {
+            shuffle(p->deck, p->deck_n, &p->rng);
+        }
     }
 }
 
