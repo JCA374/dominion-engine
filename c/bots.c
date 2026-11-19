@@ -103,3 +103,53 @@ void de_resume_check(const int *kingdom, int kn, uint64_t seed, int at, int *out
     out[1] = de_winners(&copy) == de_winners(&g);
     out[2] = de_score(&copy, 0) == de_score(&g, 0) && de_score(&copy, 1) == de_score(&g, 1);
 }
+
+/* Test of de_resume_action: random bots play a game; at player 0's `at`-th PLAY_ACTION decision a
+ * copy of the game and of both bots is taken; after the game the copy is resumed with the same
+ * answer and must finish identically. out: [same turns and decks, same winners, same scores, copied]. */
+typedef struct { bot b; int at, seen, copied, answer; de_game *copy; bot saved[2]; void *all; } aspy;
+
+static int aspy_decide(void *ctx, const de_game *g, int kind, int player, int subject,
+                       const int *opts, int n, int may_pass) {
+    aspy *s = ctx;
+    aspy *all = s->all;
+    if (kind == DE_PLAY_ACTION && s->at && !s->copied && ++s->seen == s->at) {
+        *s->copy = *g;
+        s->saved[0] = all[0].b;
+        s->saved[1] = all[1].b;
+        s->copied = 1;
+        int a = bot_decide(&s->b, g, kind, player, subject, opts, n, may_pass);
+        s->answer = a;
+        return a;
+    }
+    return bot_decide(&s->b, g, kind, player, subject, opts, n, may_pass);
+}
+
+void de_resume_action_check(const int *kingdom, int kn, uint64_t seed, int at, int *out) {
+    static de_game g, copy;
+    aspy spies[2];
+    de_agent agents[2];
+    for (int i = 0; i < 2; i++) {
+        spies[i] = (aspy){{BOT_RANDOM, seed * 7 + i + 1}, i == 0 ? at : 0, 0, 0, -1, &copy, {{0}}, spies};
+        agents[i].decide = aspy_decide;
+        agents[i].ctx = &spies[i];
+    }
+    de_init(&g, kingdom, kn, 2, seed);
+    de_run(&g, agents);
+    out[3] = spies[0].copied;
+    if (!spies[0].copied) { out[0] = out[1] = out[2] = 0; return; }
+    spies[0].b = spies[0].saved[0];
+    spies[1].b = spies[0].saved[1];
+    /* the copy was taken before the answer was drawn: draw it again from the restored bot */
+    spies[0].at = 0;
+    (void)de_rng_next(&spies[0].b.rng);       /* a random bot draws once per decision */
+    de_resume_action(&copy, agents, spies[0].answer, 1);
+    int same = 1;
+    for (int i = 0; i < 2; i++) {
+        same &= copy.p[i].turns == g.p[i].turns;
+        for (int c = 0; c < DE_NUM_CARDS; c++) same &= de_count(&copy.p[i], c) == de_count(&g.p[i], c);
+    }
+    out[0] = same;
+    out[1] = de_winners(&copy) == de_winners(&g);
+    out[2] = de_score(&copy, 0) == de_score(&g, 0) && de_score(&copy, 1) == de_score(&g, 1);
+}

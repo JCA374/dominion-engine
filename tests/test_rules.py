@@ -1,8 +1,10 @@
 """Steam rules and every card, on hand-made positions (Python engine; parity covers C)."""
+import pytest
+
 from dominion_engine import cards as C, rules
 from dominion_engine.cards import ID
 from dominion_engine.game import (ARTISAN_GAIN, ARTISAN_TOPDECK, BANDIT_TRASH, BUREAUCRAT_TOPDECK,
-                                  CELLAR_DISCARD, HARBINGER_TOPDECK, LIBRARY_SKIP, MILITIA_DISCARD,
+                                  CELLAR_DISCARD, CHAPEL_TRASH, MINE_GAIN, MINE_TRASH, MONEYLENDER_TRASH, HARBINGER_TOPDECK, LIBRARY_SKIP, MILITIA_DISCARD,
                                   POACHER_DISCARD, REMODEL_GAIN, REMODEL_TRASH, SENTRY_CARD,
                                   SENTRY_DISCARD, SENTRY_KEEP, SENTRY_TOP, SENTRY_TRASH, THRONE,
                                   VASSAL_PLAY, WORKSHOP_GAIN, Game, play)
@@ -223,3 +225,112 @@ def test_throne_room_may_decline():
     g = position(["Throne Room", "Village"])
     asked = run(g, "Throne Room", [-1])
     assert asked[0].kind == THRONE and C.VILLAGE in g.players[0].hand
+
+
+# -- the plain cards (no choices) and the "you may" trashers -------------------------------
+
+def test_market_lab_festival_give_their_plus():
+    g = position(["Market"], deck=["Gold", "Silver"], kingdom=KINGDOM[:-1] + ["Market"])
+    run(g, "Market")
+    assert (g.actions, g.buys, g.coins) == (1, 2, 1) and g.players[0].hand == [C.GOLD]
+    g = position(["Laboratory"], deck=["Gold", "Silver", "Copper"], kingdom=KINGDOM[:-1] + ["Laboratory"])
+    run(g, "Laboratory")
+    assert (g.actions, g.buys, g.coins) == (1, 1, 0) and names(g.players[0].hand) == ["Gold", "Silver"]
+    g = position(["Festival"], deck=["Gold"], kingdom=KINGDOM[:-1] + ["Festival"])
+    run(g, "Festival")
+    assert (g.actions, g.buys, g.coins) == (2, 2, 2) and g.players[0].hand == []
+
+
+def test_chapel_trashes_up_to_four_and_may_stop():
+    hand = ["Chapel", "Estate", "Estate", "Copper", "Copper", "Curse"]
+    g = position(hand, kingdom=KINGDOM[:-1] + ["Chapel"])
+    asked = run(g, "Chapel", [C.ESTATE, C.ESTATE, C.CURSE, C.COPPER])
+    assert [d.kind for d in asked] == [CHAPEL_TRASH] * 4 and [d.subject for d in asked] == [0, 1, 2, 3]
+    assert g.players[0].hand == [C.COPPER] and names(g.trash) == ["Copper", "Curse", "Estate", "Estate"]
+    g = position(hand, kingdom=KINGDOM[:-1] + ["Chapel"])
+    run(g, "Chapel", [C.CURSE, -1])
+    assert g.trash == [C.CURSE] and len(g.players[0].hand) == 4
+    g = position(["Chapel"], kingdom=KINGDOM[:-1] + ["Chapel"])
+    assert run(g, "Chapel") == []                     # empty hand: nothing to ask
+
+
+def test_moneylender_trashes_a_copper_for_three_or_declines():
+    g = position(["Moneylender", "Copper", "Copper"], kingdom=KINGDOM[:-1] + ["Moneylender"])
+    asked = run(g, "Moneylender", [C.COPPER])
+    assert asked[0].kind == MONEYLENDER_TRASH and asked[0].may_pass
+    assert g.coins == 3 and g.trash == [C.COPPER] and g.players[0].hand == [C.COPPER]
+    g = position(["Moneylender", "Copper"], kingdom=KINGDOM[:-1] + ["Moneylender"])
+    run(g, "Moneylender", [-1])
+    assert g.coins == 0 and g.trash == []
+    g = position(["Moneylender", "Silver"], kingdom=KINGDOM[:-1] + ["Moneylender"])
+    assert run(g, "Moneylender") == []                # no Copper: no question
+
+
+def test_mine_upgrades_a_treasure_into_hand():
+    g = position(["Mine", "Silver", "Copper"], kingdom=KINGDOM[:-1] + ["Mine"])
+    asked = run(g, "Mine", [C.SILVER, C.GOLD])
+    assert [d.kind for d in asked] == [MINE_TRASH, MINE_GAIN] and asked[1].subject == C.SILVER
+    assert asked[1].options == (C.COPPER, C.SILVER, C.GOLD) and not asked[1].may_pass
+    assert names(g.players[0].hand) == ["Copper", "Gold"] and g.trash == [C.SILVER]
+    g = position(["Mine", "Copper"], kingdom=KINGDOM[:-1] + ["Mine"])
+    asked = run(g, "Mine", [C.COPPER, C.SILVER])
+    assert C.GOLD not in asked[1].options             # Copper costs 0: up to $3
+    g = position(["Mine", "Copper"], kingdom=KINGDOM[:-1] + ["Mine"])
+    run(g, "Mine", [-1])
+    assert g.trash == [] and g.players[0].hand == [C.COPPER]
+
+
+# -- Throne Room on every action card ------------------------------------------------------
+
+ACTION_CARDS = [n for n in C.KINGDOM_CARDS if C.CARDS[ID[n]].is_action and n != "Throne Room"]
+
+
+def _play_answering(g, card, first):
+    """Play `card` from player 0's hand; the first decision answers `first`, every later one
+    passes when it may, else takes the first option."""
+    p = g.players[0]
+    p.hand.remove(ID[card])
+    p.play.append(ID[card])
+    gen, asked = g._play(0, ID[card]), []
+    try:
+        d = next(gen)
+        while True:
+            asked.append(d)
+            a = first if len(asked) == 1 else (-1 if d.may_pass else d.options[0])
+            d = gen.send(a)
+    except StopIteration:
+        pass
+    return asked
+
+
+@pytest.mark.parametrize("name", ACTION_CARDS)
+def test_throne_room_plays_every_action_twice(name):
+    kingdom = [k for k in KINGDOM if k != name][:9] + [name]
+    if "Throne Room" not in kingdom:
+        kingdom[0] = "Throne Room"
+    g = position(["Throne Room", name], deck=["Copper"] * 20, kingdom=kingdom)
+    g.actions = 0
+    asked = _play_answering(g, "Throne Room", ID[name])
+    c = C.CARDS[ID[name]]
+    assert asked[0].kind == THRONE and asked[0].options == (ID[name],)
+    assert g.players[0].play.count(ID[name]) == 1 and C.THRONE_ROOM in g.players[0].play
+    assert g.actions == 2 * c.actions and g.buys == 1 + 2 * c.buys
+    if name not in ("Moneylender",):                  # passing Moneylender gives no $
+        assert g.coins == 2 * c.coins, (g.coins, c.coins)
+    if name not in ("Library", "Cellar", "Mine", "Remodel", "Artisan", "Moat"):
+        assert len(g.players[0].hand) == 2 * c.cards
+    if name == "Moat":
+        assert len(g.players[0].hand) == 4
+
+
+def test_throne_room_on_throne_room_plays_two_actions_twice_each():
+    g = position(["Throne Room", "Throne Room", "Village", "Smithy"], deck=["Copper"] * 20)
+    asked = run(g, "Throne Room", [C.THRONE_ROOM, C.VILLAGE, C.SMITHY])
+    assert [d.kind for d in asked] == [THRONE] * 3
+    assert g.actions == 4 and len(g.players[0].hand) == 2 + 6
+
+
+def test_throne_room_with_no_action_offers_only_pass():
+    g = position(["Throne Room", "Copper", "Estate"])
+    asked = run(g, "Throne Room", [-1])
+    assert asked[0].kind == THRONE and asked[0].options == () and asked[0].may_pass

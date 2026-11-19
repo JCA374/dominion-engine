@@ -386,12 +386,9 @@ static void play_card(de_game *g, int i, int card) {
 static void buy_phase(de_game *g, int i);
 static void cleanup(de_game *g, int i);
 
-static void turn(de_game *g, int i) {
+static void action_phase(de_game *g, int i) {
     de_player *p = &g->p[i];
     int opts[DE_NUM_CARDS], n;
-    g->current = i;
-    g->actions = 1; g->buys = 1; g->coins = 0; g->merchants = 0;
-
     while (g->actions > 0) {
         n = distinct(p->hand, p->hand_n, DE_ACTION, opts);
         if (!n) break;
@@ -402,7 +399,10 @@ static void turn(de_game *g, int i) {
         p->play[p->play_n++] = a;
         play_card(g, i, a);
     }
+}
 
+static void treasures_buys_cleanup(de_game *g, int i) {
+    de_player *p = &g->p[i];
     int silver = 0, rest = 0;
     for (int k = 0; k < p->hand_n; k++) {
         int c = p->hand[k];
@@ -417,6 +417,13 @@ static void turn(de_game *g, int i) {
     p->hand_n = rest;
     buy_phase(g, i);
     cleanup(g, i);
+}
+
+static void turn(de_game *g, int i) {
+    g->current = i;
+    g->actions = 1; g->buys = 1; g->coins = 0; g->merchants = 0;
+    action_phase(g, i);
+    treasures_buys_cleanup(g, i);
 }
 
 static void buy_card(de_game *g, int i, int b) {
@@ -514,6 +521,22 @@ void de_resume_buy(de_game *g, const de_agent *agents, int first) {
     cleanup(g, i);
     if (game_over(g)) { g->over = 1; return; }
     run_from(g, i + 1);
+}
+
+void de_resume_action(de_game *g, const de_agent *agents, int first, int whole_game) {
+    int i = g->current;
+    de_player *p = &g->p[i];
+    g->agents = agents;
+    if (first >= 0) {
+        g->actions--;
+        rm(p->hand, &p->hand_n, first);
+        p->play[p->play_n++] = first;
+        play_card(g, i, first);
+        action_phase(g, i);
+    }
+    treasures_buys_cleanup(g, i);
+    if (game_over(g)) { g->over = 1; return; }
+    if (whole_game) run_from(g, i + 1);
 }
 
 void de_hide(de_game *g, int me, uint64_t seed) {

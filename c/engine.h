@@ -95,5 +95,9 @@ uint64_t de_rng_next(uint64_t *state);
  * these continue a game, they add no rules. */
 void de_resume_buy(de_game *g, const de_agent *agents, int first);
 void de_hide(de_game *g, int me, uint64_t seed);
+/* From inside a DE_PLAY_ACTION decision: play `first` (-1 = end the action phase), let the agents
+ * finish the turn (more actions, buys, cleanup) and, if whole_game, the rest of the game. With
+ * whole_game = 0 it stops after this turn's cleanup (g->current is still the mover). */
+void de_resume_action(de_game *g, const de_agent *agents, int first, int whole_game);
 
 #endif

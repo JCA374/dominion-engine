@@ -15,6 +15,12 @@ Two engines, one game:
 Both use the same xorshift64 RNG and ask the same decisions in the same order, so the same
 seed and the same answers give the same game. `tests/test_parity.py` checks this on random
 bots, random kingdoms and 2-4 players, and checks every kind of decision comes up.
+`tests/test_cards_all.py` plays each of the 26 kingdom cards in whole games (bought, played, its
+decisions asked, both engines identical); `tests/test_rules.py` has a hand-made position per card.
+
+Search agents (C only) copy a game (a plain struct), hide what the mover cannot see (`de_hide`) and
+continue it: `de_resume_buy` from a buy decision, `de_resume_action` from an action decision (to the
+end of that turn, or of the game). These add no rules.
 
 ## Use
 
