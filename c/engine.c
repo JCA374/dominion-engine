@@ -572,12 +572,14 @@ int de_total(const de_player *p) {
 
 int de_score(const de_game *g, int i) {
     const de_player *p = &g->p[i];
-    int vp = 0;
-    for (int c = 0; c < DE_NUM_CARDS; c++) {
-        int n = de_count(p, c);
-        if (n) vp += n * DE_CARDS[c].vp;
-    }
-    return vp + de_count(p, DE_GARDENS) * (de_total(p) / 10);
+    int cnt[DE_NUM_CARDS] = {0}, vp = 0;          /* one pass over the zones (was one de_count per card) */
+    for (int k = 0; k < p->deck_n; k++) cnt[p->deck[k]]++;
+    for (int k = 0; k < p->hand_n; k++) cnt[p->hand[k]]++;
+    for (int k = 0; k < p->discard_n; k++) cnt[p->discard[k]]++;
+    for (int k = 0; k < p->play_n; k++) cnt[p->play[k]]++;
+    for (int c = 0; c < DE_NUM_CARDS; c++)
+        if (cnt[c]) vp += cnt[c] * DE_CARDS[c].vp;
+    return vp + cnt[DE_GARDENS] * (de_total(p) / 10);
 }
 
 int de_winners(const de_game *g) {
